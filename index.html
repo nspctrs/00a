@@ -1,41 +1,19 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Simulador educacional de urna eletrônica — Espírito Santo 2026">
-  <title>Urna Eletrônica — ES 2026</title>
-  <link rel="stylesheet" href="styles.css">
+  <title>Urna Eletrônica — ES 2026</title><link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main class="shell">
-    <header class="topbar">
-      <div class="brand"><div class="eyebrow">SIMULAÇÃO EDUCACIONAL</div><h1>URNA ELETRÔNICA</h1><div class="subtitle">ELEIÇÕES GERAIS · ESPÍRITO SANTO · 2026</div></div>
-      <div class="machine-id"><span class="led"></span> URNA ES-2026</div>
-    </header>
-
-    <section class="machine">
-      <div class="screen-wrap"><div class="screen" id="screen"><div class="loading">Carregando dados de candidaturas…</div></div></div>
-      <div class="keyboard" aria-label="Teclado da urna">
-        <div class="keyboard-title">TECLADO NUMÉRICO</div>
-        <div class="num-grid">
-          <button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button>
-          <button data-key="4">4</button><button data-key="5">5</button><button data-key="6">6</button>
-          <button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button>
-          <button data-key="0" class="zero">0</button>
-        </div>
-        <div class="action-row"><button class="action blank" id="blankBtn">BRANCO</button><button class="action correct" id="correctBtn">CORRIGE</button><button class="action confirm" id="confirmBtn">CONFIRMA</button></div>
-      </div>
-    </section>
-
-    <section class="control-panel">
-      <div class="status-line"><span class="status-light"></span><div><strong id="status">Inicializando…</strong><small>Os votos são armazenados localmente neste navegador.</small></div></div>
-      <div class="controls"><button id="newVote">＋ NOVA VOTAÇÃO</button><button id="exportJson">↓ BACKUP JSON</button><button id="exportCsv">↓ EXPORTAR CSV</button><label class="import-label">↑ RESTAURAR BACKUP<input type="file" id="importFile" accept="application/json"></label><button id="countBtn">▤ APURAÇÃO</button><button id="clearBtn" class="danger">× LIMPAR DADOS</button></div>
-    </section>
-
+    <header class="topbar"><div class="brand"><div class="eyebrow">SIMULAÇÃO EDUCACIONAL</div><h1>URNA ELETRÔNICA</h1><div class="subtitle">ELEIÇÕES GERAIS · ESPÍRITO SANTO · 2026</div></div><div class="machine-id"><span class="led"></span> URNA ES-2026</div></header>
+    <section class="machine"><div class="screen-wrap"><div class="screen" id="screen"><div class="loading">Carregando dados de candidaturas…</div></div></div><div class="keyboard" aria-label="Teclado da urna"><div class="keyboard-title">TECLADO NUMÉRICO</div><div class="num-grid"><button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button><button data-key="4">4</button><button data-key="5">5</button><button data-key="6">6</button><button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button><button data-key="0" class="zero">0</button></div><div class="action-row"><button class="action blank" id="blankBtn">BRANCO</button><button class="action correct" id="correctBtn">CORRIGE</button><button class="action confirm" id="confirmBtn">CONFIRMA</button></div></div></section>
+    <section class="control-panel"><div class="status-line"><span class="status-light"></span><div><strong id="status">Inicializando…</strong><small>Votos ficam no terminal e, quando configurado, são sincronizados com a sessão compartilhada.</small></div></div><div class="controls"><button id="newVote">＋ NOVA VOTAÇÃO</button><button id="exportJson">↓ BACKUP JSON</button><button id="exportCsv">↓ EXPORTAR CSV</button><label class="import-label">↑ RESTAURAR BACKUP<input type="file" id="importFile" accept="application/json"></label><button id="countBtn">▤ APURAÇÃO</button><button id="clearBtn" class="danger">× LIMPAR DADOS</button></div></section>
     <section class="counting" id="counting" hidden></section>
     <footer><b>SIMULADOR INDEPENDENTE</b> · Não é uma urna oficial nem substitui sistemas da Justiça Eleitoral. <span>Dados públicos de candidaturas 2026.</span></footer>
   </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script><script src="supabase.js"></script>
   <script src="app.js" defer></script><script src="enhance.js" defer></script>
-</body>
-</html>
+</body></html>
