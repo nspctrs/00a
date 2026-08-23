@@ -1,137 +1,32 @@
-const SOURCES = {
-  ES: 'https://raw.githubusercontent.com/leofn/tse-candidatos-2026/main/dados/consulta_cand_2026_ES.csv',
-  BR: 'https://raw.githubusercontent.com/leofn/tse-candidatos-2026/main/dados/consulta_cand_2026_BR.csv'
-};
-
-const STEPS = [
-  { key:'depFederal', cargo:'DEPUTADO FEDERAL', label:'Deputado Federal', digits:4, uf:'ES' },
-  { key:'depEstadual', cargo:'DEPUTADO ESTADUAL', label:'Deputado Estadual', digits:5, uf:'ES' },
-  { key:'senador1', cargo:'SENADOR', label:'Senador — 1ª vaga', digits:3, uf:'ES' },
-  { key:'senador2', cargo:'SENADOR', label:'Senador — 2ª vaga', digits:3, uf:'ES' },
-  { key:'governador', cargo:'GOVERNADOR', label:'Governador', digits:2, uf:'ES' },
-  { key:'presidente', cargo:'PRESIDENTE', label:'Presidente', digits:2, uf:'BR' }
-];
-
-const state = { candidates:[], byStep:{}, step:0, digits:'', current:null, selections:{}, loading:true, simId:null };
-const screen = document.getElementById('screen');
-const status = document.getElementById('status');
-const counting = document.getElementById('counting');
-
-const DB_NAME='urna-00a-db', DB_VERSION=1, STORE='votes';
-function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,DB_VERSION);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains(STORE)){const s=db.createObjectStore(STORE,{keyPath:'id'});s.createIndex('simId','simId');}};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
-async function saveVote(v){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(v);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
-async function getVotes(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly');const req=tx.objectStore(STORE).getAll();req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});}
-async function clearVotes(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
-
-function parseCSV(text){
-  const rows=[]; let row=[], field='', quoted=false;
-  for(let i=0;i<text.length;i++){
-    const c=text[i], n=text[i+1];
-    if(c==='"' && quoted && n==='"'){field+='"';i++;continue;}
-    if(c==='"'){quoted=!quoted;continue;}
-    if(c===';' && !quoted){row.push(field);field='';continue;}
-    if((c==='\n' || c==='\r') && !quoted){if(c==='\r'&&n==='\n')i++;row.push(field);field='';if(row.some(x=>x!==''))rows.push(row);row=[];continue;}
-    field+=c;
-  }
-  if(field!==''||row.length){row.push(field);rows.push(row);}
-  const headers=rows.shift().map(h=>h.trim());
-  return rows.map(r=>Object.fromEntries(headers.map((h,i)=>[h,(r[i]??'').trim()])));
-}
-
-async function loadCandidates(){
-  try{
-    const [esRes,brRes]=await Promise.all([fetch(SOURCES.ES),fetch(SOURCES.BR)]);
-    if(!esRes.ok||!brRes.ok)throw new Error('Falha ao carregar dados');
-    const es=parseCSV(await esRes.text()), br=parseCSV(await brRes.text());
-    state.candidates=[...es.map(c=>({...c,source:'ES'})),...br.map(c=>({...c,source:'BR'}))];
-    for(const s of STEPS){
-      const source=s.uf==='BR'?'BR':'ES';
-      const cargo=s.cargo==='PRESIDENTE'?'PRESIDENTE':s.cargo;
-      state.byStep[s.key]=state.candidates.filter(c=>c.source===source && c.DS_CARGO===cargo && !['1º SUPLENTE','2º SUPLENTE'].includes(c.DS_CARGO));
-    }
-    state.loading=false; status.textContent=`Dados carregados: ${state.byStep.depFederal.length} federais, ${state.byStep.depEstadual.length} estaduais e candidaturas majoritárias.`;
-    render();
-  }catch(e){
-    state.loading=false; screen.innerHTML=`<div class="white-card"><h2>Não foi possível carregar as candidaturas</h2><p>Confira sua conexão e recarregue a página. Os dados são obtidos de arquivos públicos de candidaturas de 2026.</p><p>${escapeHtml(e.message)}</p></div>`;
-    status.textContent='Erro ao carregar candidaturas.';
-  }
-}
-
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
-function currentStep(){return STEPS[state.step];}
-function candidateForNumber(step,num){return (state.byStep[step.key]||[]).find(c=>String(c.NR_CANDIDATO).padStart(step.digits,'0')===num);}
-function photoUrl(c){return c?.NR_CANDIDATO?`https://placehold.co/224x280/e1e3e5/30353a?text=${encodeURIComponent((c.NM_URNA_CANDIDATO||c.NM_CANDIDATO||'').slice(0,18))}`:'';}
-function renderDigits(){return Array.from({length:currentStep().digits},(_,i)=>`<span class="digit">${state.digits[i]||'_'}</span>`).join('');}
-
-function render(){
-  if(state.loading)return;
-  if(state.step>=STEPS.length){renderFinished();return;}
-  const s=currentStep(), num=state.digits.padStart(s.digits,'_');
-  const c=state.digits.length===s.digits?candidateForNumber(s,state.digits):null;
-  const invalid=state.digits.length===s.digits && !c;
-  const vote=state.selections[s.key];
-  screen.innerHTML=`<div class="vote-head"><div class="step">ETAPA ${state.step+1} DE ${STEPS.length}</div><h2>${s.label}</h2></div>
-    <p>Digite o número e confira os dados antes de confirmar.</p>
-    <div class="number-box">${renderDigits()}</div>
-    ${vote?.type==='white'?'<div class="white-card">VOTO EM BRANCO</div>':vote?.type==='null'||invalid?'<div class="white-card"><strong>VOTO NULO</strong><br>Número não corresponde a uma candidatura carregada.</div>':c?`<div class="candidate-card"><img class="photo" src="${photoUrl(c)}" alt="Foto ilustrativa de ${escapeHtml(c.NM_URNA_CANDIDATO||c.NM_CANDIDATO)}"><div><div class="candidate-name">${escapeHtml(c.NM_URNA_CANDIDATO||c.NM_CANDIDATO)}</div><div class="party">${escapeHtml(c.SG_PARTIDO||'')}</div><div>${escapeHtml(c.NM_PARTIDO||'')}</div><div class="instruction">${s.cargo==='SENADOR'?'Candidato ao Senado.':'Confira o nome e o partido.'}</div></div></div>`:'<div class="instruction">Digite o número para identificar a candidatura.</div>'}
-    <div class="instruction"><b>BRANCO</b> para votar em branco · <b>CORRIGE</b> para apagar · <b>CONFIRMA</b> para registrar.</div>`;
-  document.getElementById('confirmBtn').classList.toggle('disabled',!(state.digits.length===s.digits||vote));
-}
-
-function setDigit(k){if(state.step>=STEPS.length)return;const s=currentStep();if(state.digits.length<s.digits){state.digits+=k;state.selections[s.key]=undefined;render();}}
-function correct(){state.digits='';state.selections[currentStep().key]=undefined;render();}
-function blank(){state.digits='';state.selections[currentStep().key]={type:'white'};render();}
-
-async function confirm(){
-  const s=currentStep();
-  let selection;
-  if(state.selections[s.key])selection=state.selections[s.key];
-  else if(state.digits.length===s.digits){const c=candidateForNumber(s,state.digits);selection=c?{type:'candidate',number:state.digits,candidateId:c.SQ_CANDIDATO,name:c.NM_URNA_CANDIDATO||c.NM_CANDIDATO,party:c.SG_PARTIDO,cargo:s.cargo}:{type:'null',number:state.digits,cargo:s.cargo};}
-  else return;
-  state.selections[s.key]=selection;
-  if(s.key==='senador1') state.step++;
-  else if(s.key==='senador2') state.step++;
-  else state.step++;
-  state.digits='';
-  render();
-}
-
-async function renderFinished(){
-  const vote={id:crypto.randomUUID(),simId:state.simId,createdAt:new Date().toISOString(),selections:structuredClone(state.selections)};
-  await saveVote(vote);
-  state.selections={}; state.step=0; state.digits='';
-  status.textContent=`Voto ${vote.id.slice(0,8)} registrado localmente.`;
-  screen.innerHTML='<div class="white-card"><h2>FIM</h2><p>Votação concluída. Obrigado.</p><p>O voto foi salvo localmente no IndexedDB.</p></div>';
-  setTimeout(render,1300);
-}
-
-function download(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-async function exportJSON(){const votes=await getVotes();download(`urna-00a-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify({version:1,exportedAt:new Date().toISOString(),votes},null,2),'application/json');status.textContent=`Exportados ${votes.length} votos.`;}
-function csvEscape(v){return `"${String(v??'').replaceAll('"','""')}"`;}
-async function exportCSV(){const votes=await getVotes();const cols=['id','simId','createdAt','depFederal','depEstadual','senador1','senador2','governador','presidente'];const lines=[cols.join(';')];for(const v of votes){lines.push(cols.map(k=>k==='id'||k==='simId'||k==='createdAt'?csvEscape(v[k]):csvEscape(v.selections[k]?.name||v.selections[k]?.number||v.selections[k]?.type||'')).join(';'));}download(`urna-00a-${new Date().toISOString().slice(0,10)}.csv`,lines.join('\n'),'text/csv;charset=utf-8');status.textContent=`Exportados ${votes.length} votos.`;}
-
-async function importJSON(file){const obj=JSON.parse(await file.text());const votes=Array.isArray(obj)?obj:obj.votes;if(!Array.isArray(votes))throw new Error('Formato inválido');for(const v of votes)await saveVote(v);status.textContent=`Importados ${votes.length} votos.`;}
-
-async function count(){const votes=await getVotes();const tally={};for(const v of votes){for(const [k,sel] of Object.entries(v.selections||{})){const label=STEPS.find(s=>s.key===k)?.label||k;tally[label]??={};const key=sel?.type==='candidate'?(sel.candidateId+'|'+sel.name+'|'+(sel.party||'')):sel?.type||'sem registro';tally[label][key]??={name:sel?.name||sel?.type||'Sem registro',party:sel?.party||'',number:sel?.number||'',votes:0};tally[label][key].votes++;}}
-  let html=`<h2>Apuração local</h2><p><b>${votes.length}</b> votos registrados nesta base do navegador.</p>`;
-  for(const s of STEPS){html+=`<h3>${s.label}</h3><table class="count-table"><thead><tr><th>Número</th><th>Candidato</th><th>Partido</th><th>Votos</th></tr></thead><tbody>`;const rows=Object.values(tally[s.label]||{}).sort((a,b)=>b.votes-a.votes);for(const r of rows)html+=`<tr><td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.party)}</td><td>${r.votes}</td></tr>`;html+=`</tbody></table>`;}
-  counting.innerHTML=html;counting.hidden=false;counting.scrollIntoView({behavior:'smooth'});
-}
-
-function newVote(){state.step=0;state.digits='';state.selections={};state.simId=crypto.randomUUID();counting.hidden=true;render();status.textContent='Nova votação pronta.';}
-async function clearAll(){if(!confirm('Apagar todos os votos salvos neste navegador?'))return;await clearVotes();counting.hidden=true;status.textContent='Todos os votos foram apagados localmente.';}
-
-document.querySelectorAll('[data-key]').forEach(b=>b.addEventListener('click',()=>setDigit(b.dataset.key)));
-document.getElementById('correctBtn').addEventListener('click',correct);
-document.getElementById('blankBtn').addEventListener('click',blank);
-document.getElementById('confirmBtn').addEventListener('click',confirm);
-document.getElementById('newVote').addEventListener('click',newVote);
-document.getElementById('exportJson').addEventListener('click',exportJSON);
-document.getElementById('exportCsv').addEventListener('click',exportCSV);
-document.getElementById('countBtn').addEventListener('click',count);
-document.getElementById('clearBtn').addEventListener('click',clearAll);
-document.getElementById('importFile').addEventListener('change',e=>e.target.files[0]&&importJSON(e.target.files[0]).catch(err=>status.textContent='Falha na importação: '+err.message));
-document.addEventListener('keydown',e=>{if(/^\d$/.test(e.key))setDigit(e.key);else if(e.key==='Enter')confirm();else if(e.key==='Backspace')correct();});
-
-state.simId=crypto.randomUUID();
-loadCandidates();
+const SOURCES={ES:'https://raw.githubusercontent.com/leofn/tse-candidatos-2026/main/dados/consulta_cand_2026_ES.csv',BR:'https://raw.githubusercontent.com/leofn/tse-candidatos-2026/main/dados/consulta_cand_2026_BR.csv'};
+const STEPS=[{key:'depFederal',cargo:'DEPUTADO FEDERAL',label:'Deputado Federal',digits:4,uf:'ES'},{key:'depEstadual',cargo:'DEPUTADO ESTADUAL',label:'Deputado Estadual',digits:5,uf:'ES'},{key:'senador1',cargo:'SENADOR',label:'Senador — 1ª vaga',digits:3,uf:'ES'},{key:'senador2',cargo:'SENADOR',label:'Senador — 2ª vaga',digits:3,uf:'ES'},{key:'governador',cargo:'GOVERNADOR',label:'Governador',digits:2,uf:'ES'},{key:'presidente',cargo:'PRESIDENTE',label:'Presidente',digits:2,uf:'BR'}];
+const state={candidates:[],byStep:{},step:0,digits:'',selections:{},loading:true,simId:null};
+const screen=document.getElementById('screen'),status=document.getElementById('status'),counting=document.getElementById('counting');
+const DB_NAME='urna-00a-db',DB_VERSION=1,STORE='votes';
+function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,DB_VERSION);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains(STORE)){const s=db.createObjectStore(STORE,{keyPath:'id'});s.createIndex('simId','simId')}};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
+async function saveVote(v){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(v);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
+async function getVotes(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readonly'),q=tx.objectStore(STORE).getAll();q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})}
+async function clearVotes(){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
+function parseCSV(text){const rows=[];let row=[],field='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i],n=text[i+1];if(c==='"'&&quoted&&n==='"'){field+='"';i++;continue}if(c==='"'){quoted=!quoted;continue}if(c===';'&&!quoted){row.push(field);field='';continue}if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&n==='\n')i++;row.push(field);field='';if(row.some(x=>x!==''))rows.push(row);row=[];continue}field+=c}if(field!==''||row.length){row.push(field);rows.push(row)}const headers=rows.shift().map(h=>h.trim());return rows.map(r=>Object.fromEntries(headers.map((h,i)=>[h,(r[i]??'').trim()]))) }
+async function loadCandidates(){try{const[a,b]=await Promise.all([fetch(SOURCES.ES),fetch(SOURCES.BR)]);if(!a.ok||!b.ok)throw new Error('Falha ao carregar dados');const es=parseCSV(await a.text()),br=parseCSV(await b.text());state.candidates=[...es.map(c=>({...c,source:'ES'})),...br.map(c=>({...c,source:'BR'}))];for(const s of STEPS){const source=s.uf==='BR'?'BR':'ES';state.byStep[s.key]=state.candidates.filter(c=>c.source===source&&c.DS_CARGO===s.cargo)}state.loading=false;status.textContent=`Dados carregados: ${state.byStep.depFederal.length} federais, ${state.byStep.depEstadual.length} estaduais e candidaturas majoritárias.`;render()}catch(e){state.loading=false;screen.innerHTML=`<div class="white-card"><h2>Não foi possível carregar as candidaturas</h2><p>Confira sua conexão e recarregue a página.</p><p>${escapeHtml(e.message)}</p></div>`;status.textContent='Erro ao carregar candidaturas.'}}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function currentStep(){return STEPS[state.step]}
+function candidateForNumber(step,num){return(state.byStep[step.key]||[]).find(c=>String(c.NR_CANDIDATO).padStart(step.digits,'0')===num)}
+function photoUrl(c){return c?.NR_CANDIDATO?`https://placehold.co/224x280/e1e3e5/30353a?text=${encodeURIComponent((c.NM_URNA_CANDIDATO||c.NM_CANDIDATO||'').slice(0,18))}`:''}
+function renderDigits(){return Array.from({length:currentStep().digits},(_,i)=>`<span class="digit">${state.digits[i]||'_'}</span>`).join('')}
+function render(){if(state.loading)return;if(state.step>=STEPS.length){renderFinished();return}const s=currentStep(),c=state.digits.length===s.digits?candidateForNumber(s,state.digits):null,invalid=state.digits.length===s.digits&&!c,vote=state.selections[s.key];screen.innerHTML=`<div class="vote-head"><div class="step">ETAPA ${state.step+1} DE ${STEPS.length}</div><h2>${s.label}</h2></div><p>Digite o número e confira os dados antes de confirmar.</p><div class="number-box">${renderDigits()}</div>${vote?.type==='white'?'<div class="white-card">VOTO EM BRANCO</div>':vote?.type==='null'||invalid?'<div class="white-card"><strong>VOTO NULO</strong><br>Número não corresponde a uma candidatura carregada.</div>':c?`<div class="candidate-card"><img class="photo" src="${photoUrl(c)}" alt="Foto ilustrativa de ${escapeHtml(c.NM_URNA_CANDIDATO||c.NM_CANDIDATO)}"><div><div class="candidate-name">${escapeHtml(c.NM_URNA_CANDIDATO||c.NM_CANDIDATO)}</div><div class="party">${escapeHtml(c.SG_PARTIDO||'')}</div><div>${escapeHtml(c.NM_PARTIDO||'')}</div><div class="instruction">Confira o nome e o partido.</div></div></div>`:'<div class="instruction">Digite o número para identificar a candidatura.</div>'}<div class="instruction"><b>BRANCO</b> para votar em branco · <b>CORRIGE</b> para apagar · <b>CONFIRMA</b> para registrar.</div>`;document.getElementById('confirmBtn').classList.toggle('disabled',!(state.digits.length===s.digits||vote))}
+function setDigit(k){if(state.step>=STEPS.length)return;const s=currentStep();if(state.digits.length<s.digits){state.digits+=k;state.selections[s.key]=undefined;render()}}
+function correct(){state.digits='';state.selections[currentStep().key]=undefined;render()}
+function blank(){state.digits='';state.selections[currentStep().key]={type:'white'};render()}
+async function confirmVote(){const s=currentStep();let selection;if(state.selections[s.key])selection=state.selections[s.key];else if(state.digits.length===s.digits){const c=candidateForNumber(s,state.digits);selection=c?{type:'candidate',number:state.digits,candidateId:c.SQ_CANDIDATO,name:c.NM_URNA_CANDIDATO||c.NM_CANDIDATO,party:c.SG_PARTIDO,cargo:s.cargo}:{type:'null',number:state.digits,cargo:s.cargo}}else return;state.selections[s.key]=selection;state.step++;state.digits='';render()}
+async function renderFinished(){const vote={id:crypto.randomUUID(),simId:state.simId,createdAt:new Date().toISOString(),selections:structuredClone(state.selections)};await saveVote(vote);state.selections={};state.step=0;state.digits='';status.textContent=`Voto ${vote.id.slice(0,8)} registrado localmente.`;screen.innerHTML='<div class="white-card"><h2>FIM</h2><p>Votação concluída. Obrigado.</p><p>O voto foi salvo localmente no IndexedDB.</p></div>';setTimeout(render,1300)}
+function download(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+async function exportJSON(){const votes=await getVotes();download(`urna-00a-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify({version:1,exportedAt:new Date().toISOString(),votes},null,2),'application/json');status.textContent=`Exportados ${votes.length} votos.`}
+function csvEscape(v){return`"${String(v??'').replaceAll('"','""')}"`}
+async function exportCSV(){const votes=await getVotes(),cols=['id','simId','createdAt','depFederal','depEstadual','senador1','senador2','governador','presidente'],lines=[cols.join(';')];for(const v of votes)lines.push(cols.map(k=>k==='id'||k==='simId'||k==='createdAt'?csvEscape(v[k]):csvEscape(v.selections[k]?.name||v.selections[k]?.number||v.selections[k]?.type||'')).join(';'));download(`urna-00a-${new Date().toISOString().slice(0,10)}.csv`,lines.join('\n'),'text/csv;charset=utf-8');status.textContent=`Exportados ${votes.length} votos.`}
+async function importJSON(file){const obj=JSON.parse(await file.text()),votes=Array.isArray(obj)?obj:obj.votes;if(!Array.isArray(votes))throw new Error('Formato inválido');for(const v of votes)await saveVote(v);status.textContent=`Importados ${votes.length} votos.`}
+async function count(){const votes=await getVotes(),tally={};for(const v of votes)for(const[k,sel]of Object.entries(v.selections||{})){const label=STEPS.find(s=>s.key===k)?.label||k;tally[label]??={};const key=sel?.type==='candidate'?(sel.candidateId+'|'+sel.name+'|'+(sel.party||'')):sel?.type||'sem registro';tally[label][key]??={name:sel?.name||sel?.type||'Sem registro',party:sel?.party||'',number:sel?.number||'',votes:0};tally[label][key].votes++}let html=`<h2>Apuração local</h2><p><b>${votes.length}</b> votos registrados nesta base do navegador.</p>`;for(const s of STEPS){html+=`<h3>${s.label}</h3><table class="count-table"><thead><tr><th>Número</th><th>Candidato</th><th>Partido</th><th>Votos</th></tr></thead><tbody>`;for(const r of Object.values(tally[s.label]||{}).sort((a,b)=>b.votes-a.votes))html+=`<tr><td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.party)}</td><td>${r.votes}</td></tr>`;html+='</tbody></table>'}counting.innerHTML=html;counting.hidden=false;counting.scrollIntoView({behavior:'smooth'})}
+function newVote(){state.step=0;state.digits='';state.selections={};state.simId=crypto.randomUUID();counting.hidden=true;render();status.textContent='Nova votação pronta.'}
+async function clearAll(){if(!window.confirm('Apagar todos os votos salvos neste navegador?'))return;await clearVotes();counting.hidden=true;status.textContent='Todos os votos foram apagados localmente.'}
+document.querySelectorAll('[data-key]').forEach(b=>b.addEventListener('click',()=>setDigit(b.dataset.key)));document.getElementById('correctBtn').addEventListener('click',correct);document.getElementById('blankBtn').addEventListener('click',blank);document.getElementById('confirmBtn').addEventListener('click',confirmVote);document.getElementById('newVote').addEventListener('click',newVote);document.getElementById('exportJson').addEventListener('click',exportJSON);document.getElementById('exportCsv').addEventListener('click',exportCSV);document.getElementById('countBtn').addEventListener('click',count);document.getElementById('clearBtn').addEventListener('click',clearAll);document.getElementById('importFile').addEventListener('change',e=>e.target.files[0]&&importJSON(e.target.files[0]).catch(err=>status.textContent='Falha na importação: '+err.message));document.addEventListener('keydown',e=>{if(/^\d$/.test(e.key))setDigit(e.key);else if(e.key==='Enter')confirmVote();else if(e.key==='Backspace')correct()});
+state.simId=crypto.randomUUID();loadCandidates();
